@@ -1,25 +1,25 @@
 <script setup lang="ts">
-import { h, nextTick, onActivated, onMounted, ref } from "vue";
-import { NDialog, NInput, useDialog, useMessage } from "naive-ui";
+import { h, onActivated, onMounted, ref } from "vue";
+import { MessageReactive, NDialog, useDialog, useMessage } from "naive-ui";
 import { useGlobalStore } from "../store/global";
 import { onBeforeRouteLeave, useRouter } from "vue-router";
 import {
+  KeyInputHandler,
   applyShortcuts,
   clearShortcuts,
   listenToEvent,
   unlistenToEvent,
-  updateScreenSizeAndMaskArea,
 } from "../hotkey";
-import { KeyMappingConfig, KeySteeringWheel } from "../keyMappingConfig";
+import { KeySteeringWheel } from "../keyMappingConfig";
+import ScreenStream from "./ScreenStream.vue";
 import { getVersion } from "@tauri-apps/api/app";
 import { fetch } from "@tauri-apps/plugin-http";
 import { open } from "@tauri-apps/plugin-shell";
-import { sendSetClipboard } from "../frontcommand/controlMsg";
 import { getCurrent, PhysicalSize } from "@tauri-apps/api/window";
-import { AndroidKeycode } from "../frontcommand/android";
 import { Store } from "@tauri-apps/plugin-store";
 import { useI18n } from "vue-i18n";
-import { SendKeyAction, sendKey } from "../frontcommand/scrcpyMaskCmd";
+import { checkAdbAvailable } from "../invoke";
+import { loadLocalStorage } from "../storeLoader";
 
 const { t } = useI18n();
 const store = useGlobalStore();
@@ -27,31 +27,26 @@ const router = useRouter();
 const message = useMessage();
 const dialog = useDialog();
 
-const showInputBoxRef = ref(false);
-const inputBoxVal = ref("");
-const inputInstRef = ref<HTMLInputElement | null>(null);
+const curPageActive = ref(false);
 
 onBeforeRouteLeave(() => {
+  curPageActive.value = false;
   if (store.controledDevice) {
     unlistenToEvent();
     clearShortcuts();
+    if (store.keyInputFlag) KeyInputHandler.removeEventListener();
   }
 });
 
 onActivated(async () => {
+  curPageActive.value = true;
   cleanAfterimage();
-  const maskElement = document.getElementById("maskElement") as HTMLElement;
 
   if (store.controledDevice) {
-    updateScreenSizeAndMaskArea(
-      [store.screenSizeW, store.screenSizeH],
-      [maskElement.clientWidth, maskElement.clientHeight]
-    );
-
     if (
       applyShortcuts(
-        maskElement,
         store.keyMappingConfigList[store.curKeyMappingIndex],
+        store,
         message,
         t
       )
@@ -64,79 +59,52 @@ onActivated(async () => {
 });
 
 onMounted(async () => {
+  store.screenStreamClientId = genClientId();
   await loadLocalStore();
   store.checkUpdate = checkUpdate;
-  store.showInputBox = showInputBox;
   if (store.checkUpdateAtStart) checkUpdate();
+  store.checkAdb = checkAdb;
+  setTimeout(() => {
+    checkAdb();
+    // listen to window resize event
+    const maskElement = document.getElementById("maskElement") as HTMLElement;
+    const appWindow = getCurrent();
+    appWindow.onResized(() => {
+      store.maskSizeH = maskElement.clientHeight;
+      store.maskSizeW = maskElement.clientWidth;
+    });
+  }, 500);
 });
+
+let checkAdbMessage: MessageReactive | null = null;
+async function checkAdb() {
+  try {
+    if (checkAdbMessage) {
+      checkAdbMessage.destroy();
+      checkAdbMessage = null;
+    }
+    await checkAdbAvailable();
+  } catch (e) {
+    checkAdbMessage = message.error(t("pages.Mask.checkAdb", [e]), {
+      duration: 0,
+    });
+  }
+}
+
+function genClientId() {
+  let result = "";
+  const characters =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  const charactersLength = characters.length;
+  for (let i = 0; i < 16; i++) {
+    result += characters.charAt(Math.floor(Math.random() * charactersLength));
+  }
+  return result;
+}
 
 async function loadLocalStore() {
   const localStore = new Store("store.bin");
-  // loading screenSize from local store
-  const screenSize = await localStore.get<{ sizeW: number; sizeH: number }>(
-    "screenSize"
-  );
-  if (screenSize !== null) {
-    store.screenSizeW = screenSize.sizeW;
-    store.screenSizeH = screenSize.sizeH;
-  }
-
-  // loading keyMappingConfigList from local store
-  let keyMappingConfigList = await localStore.get<KeyMappingConfig[]>(
-    "keyMappingConfigList"
-  );
-  if (keyMappingConfigList === null || keyMappingConfigList.length === 0) {
-    // add empty key mapping config
-    // unable to get mask element when app is not ready
-    // so we use the stored mask area to get relative size
-    const maskArea = await localStore.get<{
-      posX: number;
-      posY: number;
-      sizeW: number;
-      sizeH: number;
-    }>("maskArea");
-    let relativeSize = { w: 800, h: 600 };
-    if (maskArea !== null) {
-      relativeSize = {
-        w: maskArea.sizeW,
-        h: maskArea.sizeH,
-      };
-    }
-    keyMappingConfigList = [
-      {
-        relativeSize,
-        title: t("pages.Mask.blankConfig"),
-        list: [],
-      },
-    ];
-    await localStore.set("keyMappingConfigList", keyMappingConfigList);
-  }
-  store.keyMappingConfigList = keyMappingConfigList;
-
-  // loading curKeyMappingIndex from local store
-  let curKeyMappingIndex = await localStore.get<number>("curKeyMappingIndex");
-  if (
-    curKeyMappingIndex === null ||
-    curKeyMappingIndex >= keyMappingConfigList.length
-  ) {
-    curKeyMappingIndex = 0;
-    localStore.set("curKeyMappingIndex", curKeyMappingIndex);
-  }
-  store.curKeyMappingIndex = curKeyMappingIndex;
-
-  // loading maskButton from local store
-  let maskButton = await localStore.get<{
-    show: boolean;
-    transparency: number;
-  }>("maskButton");
-  store.maskButton = maskButton ?? {
-    show: true,
-    transparency: 0.5,
-  };
-
-  // loading checkUpdateAtStart from local store
-  let checkUpdateAtStart = await localStore.get<boolean>("checkUpdateAtStart");
-  store.checkUpdateAtStart = checkUpdateAtStart ?? true;
+  await loadLocalStorage(localStore, store, t);
 }
 
 async function cleanAfterimage() {
@@ -145,64 +113,6 @@ async function cleanAfterimage() {
   const newSize = new PhysicalSize(oldSize.width, oldSize.height + 1);
   await appWindow.setSize(newSize);
   await appWindow.setSize(oldSize);
-}
-
-function handleInputBoxClick(event: MouseEvent) {
-  if (event.target === document.getElementById("input-box")) {
-    showInputBox(false);
-  }
-}
-
-function handleInputKeyUp(event: KeyboardEvent) {
-  if (event.key === "Enter") {
-    pasteText();
-  } else if (event.key === "Escape") {
-    showInputBox(false);
-  }
-}
-
-function showInputBox(flag: boolean) {
-  if (flag) {
-    unlistenToEvent();
-    inputBoxVal.value = "";
-    showInputBoxRef.value = true;
-    document.addEventListener("keyup", handleInputKeyUp);
-    nextTick(() => {
-      inputInstRef.value?.focus();
-    });
-  } else {
-    document.removeEventListener("keyup", handleInputKeyUp);
-    inputInstRef.value?.blur();
-    showInputBoxRef.value = false;
-    listenToEvent();
-    nextTick(() => {
-      cleanAfterimage();
-    });
-  }
-}
-
-function sleep(time: number) {
-  return new Promise<void>((resolve) => {
-    setTimeout(() => {
-      resolve();
-    }, time);
-  });
-}
-
-async function pasteText() {
-  showInputBox(false);
-  if (!inputBoxVal.value) return;
-  sendSetClipboard({
-    sequence: new Date().getTime() % 100000,
-    text: inputBoxVal.value,
-    paste: true,
-  });
-  await sleep(300);
-  // send enter
-  await sendKey({
-    action: SendKeyAction.Default,
-    keycode: AndroidKeycode.AKEYCODE_ENTER,
-  });
 }
 
 function toStartServer() {
@@ -284,19 +194,10 @@ async function checkUpdate() {
   </div>
   <template v-if="store.keyMappingConfigList.length">
     <div @contextmenu.prevent class="mask" id="maskElement"></div>
-    <div
-      v-show="showInputBoxRef"
-      class="input-box"
-      id="input-box"
-      @click="handleInputBoxClick"
-    >
-      <NInput
-        ref="inputInstRef"
-        v-model:value="inputBoxVal"
-        type="text"
-        :placeholder="$t('pages.Mask.inputBoxPlaceholder')"
-      />
-    </div>
+    <ScreenStream
+      :cid="store.screenStreamClientId"
+      v-if="curPageActive && store.controledDevice && store.screenStream.enable"
+    />
     <div
       v-if="store.maskButton.show"
       :style="'--transparency: ' + store.maskButton.transparency"
@@ -357,26 +258,6 @@ async function checkUpdate() {
   z-index: 2;
 }
 
-.input-box {
-  z-index: 4;
-  position: absolute;
-  left: 70px;
-  top: 30px;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.5);
-
-  .n-input {
-    width: 50%;
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 15%;
-    margin: auto;
-    background-color: var(--content-bg-color);
-  }
-}
-
 .button-layer {
   position: absolute;
   left: 70px;
@@ -435,4 +316,3 @@ async function checkUpdate() {
   }
 }
 </style>
-h, import { getVersion } from "@tauri-apps/api/app";

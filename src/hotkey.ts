@@ -1,5 +1,5 @@
 // https://github.com/jamiebuilds/tinykeys/pull/193/commits/2598ecb3db6b3948c7acbf0e7bd8b0674961ad61
-import { useMessage } from "naive-ui";
+import { MessageReactive, useMessage } from "naive-ui";
 import {
   SwipeAction,
   TouchAction,
@@ -17,24 +17,33 @@ import {
   KeyObservation,
   KeySight,
   KeySteeringWheel,
+  KeySwipe,
   KeyTap,
   KeyTriggerWhenDoublePressedSkill,
   KeyTriggerWhenPressedSkill,
 } from "./keyMappingConfig";
 import { useGlobalStore } from "./store/global";
 import { LogicalPosition, getCurrent } from "@tauri-apps/api/window";
+import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import { useI18n } from "vue-i18n";
+import { KeyToCodeMap } from "./frontcommand/KeyToCodeMap";
+import {
+  AndroidKeyEventAction,
+  AndroidMetastate,
+} from "./frontcommand/android";
+import { UIEventsCode } from "./frontcommand/UIEventsCode";
+import { sendInjectKeycode, sendSetClipboard } from "./frontcommand/controlMsg";
 
 function clientxToPosx(clientx: number) {
   return clientx < 70
     ? 0
-    : Math.floor((clientx - 70) * (screenSizeW / maskSizeW));
+    : Math.floor((clientx - 70) * (store.screenSizeW / store.maskSizeW));
 }
 
 function clientyToPosy(clienty: number) {
   return clienty < 30
     ? 0
-    : Math.floor((clienty - 30) * (screenSizeH / maskSizeH));
+    : Math.floor((clienty - 30) * (store.screenSizeH / store.maskSizeH));
 }
 
 function clientxToPosOffsetx(clientx: number, posx: number, scale = 1) {
@@ -51,7 +60,10 @@ function clientPosToSkillOffset(
   clientPos: { x: number; y: number },
   range: number
 ): { offsetX: number; offsetY: number } {
-  const maxLength = (120 / maskSizeH) * screenSizeH;
+  const maskSizeH = store.maskSizeH;
+  const maskSizeW = store.maskSizeW;
+
+  const maxLength = (120 / maskSizeH) * store.screenSizeH;
   const centerX = maskSizeW * 0.5;
   const centerY = maskSizeH * 0.5;
 
@@ -95,7 +107,7 @@ function calculateMacroPosX(
   relativeSizeW: number
 ): number {
   if (typeof posX === "number") {
-    return Math.round(posX * (screenSizeW / relativeSizeW));
+    return Math.round(posX * (store.screenSizeW / relativeSizeW));
   }
   if (typeof posX === "string") {
     return clientxToPosx(mouseX);
@@ -103,7 +115,7 @@ function calculateMacroPosX(
     if (posX[0] === "mouse") {
       return (
         clientxToPosx(mouseX) +
-        Math.round(posX[1] * (screenSizeW / relativeSizeW))
+        Math.round(posX[1] * (store.screenSizeW / relativeSizeW))
       );
     } else {
       throw new Error("Invalid pos");
@@ -117,7 +129,7 @@ function calculateMacroPosY(
   relativeSizeH: number
 ): number {
   if (typeof posY === "number") {
-    return Math.round(posY * (screenSizeH / relativeSizeH));
+    return Math.round(posY * (store.screenSizeH / relativeSizeH));
   }
   if (typeof posY === "string") {
     return clientyToPosy(mouseY);
@@ -125,7 +137,7 @@ function calculateMacroPosY(
     if (posY[0] === "mouse") {
       return (
         clientyToPosy(mouseY) +
-        Math.round(posY[1] * (screenSizeH / relativeSizeH))
+        Math.round(posY[1] * (store.screenSizeH / relativeSizeH))
       );
     } else {
       throw new Error("Invalid pos");
@@ -157,8 +169,8 @@ function addObservationShortcuts(
 ) {
   let observationMouseX = 0;
   let observationMouseY = 0;
-  posX = Math.round((posX / relativeSize.w) * screenSizeW);
-  posY = Math.round((posY / relativeSize.h) * screenSizeH);
+  posX = Math.round((posX / relativeSize.w) * store.screenSizeW);
+  posY = Math.round((posY / relativeSize.h) * store.screenSizeH);
   addShortcut(
     key,
     async () => {
@@ -195,8 +207,8 @@ function addTapShortcuts(
   posY: number,
   pointerId: number
 ) {
-  posX = Math.round((posX / relativeSize.w) * screenSizeW);
-  posY = Math.round((posY / relativeSize.h) * screenSizeH);
+  posX = Math.round((posX / relativeSize.w) * store.screenSizeW);
+  posY = Math.round((posY / relativeSize.h) * store.screenSizeH);
   addShortcut(
     key,
     async () => {
@@ -216,8 +228,8 @@ function addCancelSkillShortcuts(
   posY: number,
   pointerId: number
 ) {
-  posX = Math.round((posX / relativeSize.w) * screenSizeW);
-  posY = Math.round((posY / relativeSize.h) * screenSizeH);
+  posX = Math.round((posX / relativeSize.w) * store.screenSizeW);
+  posY = Math.round((posY / relativeSize.h) * store.screenSizeH);
   addShortcut(
     key,
     async () => {
@@ -259,8 +271,8 @@ function addTriggerWhenPressedSkillShortcuts(
   rangeOrTime: number,
   pointerId: number
 ) {
-  posX = Math.round((posX / relativeSize.w) * screenSizeW);
-  posY = Math.round((posY / relativeSize.h) * screenSizeH);
+  posX = Math.round((posX / relativeSize.w) * store.screenSizeW);
+  posY = Math.round((posY / relativeSize.h) * store.screenSizeH);
   if (directional) {
     addShortcut(
       key,
@@ -276,8 +288,8 @@ function addTriggerWhenPressedSkillShortcuts(
           action: SwipeAction.Default,
           pointerId,
           screen: {
-            w: screenSizeW,
-            h: screenSizeH,
+            w: store.screenSizeW,
+            h: store.screenSizeH,
           },
           pos: [
             { x: posX, y: posY },
@@ -316,8 +328,8 @@ function addTriggerWhenDoublePressedSkillShortcuts(
   range: number,
   pointerId: number
 ) {
-  posX = Math.round((posX / relativeSize.w) * screenSizeW);
-  posY = Math.round((posY / relativeSize.h) * screenSizeH);
+  posX = Math.round((posX / relativeSize.w) * store.screenSizeW);
+  posY = Math.round((posY / relativeSize.h) * store.screenSizeH);
   doublePressedDownKey.set(key, false);
   addShortcut(
     key,
@@ -333,8 +345,8 @@ function addTriggerWhenDoublePressedSkillShortcuts(
           action: SwipeAction.NoUp,
           pointerId,
           screen: {
-            w: screenSizeW,
-            h: screenSizeH,
+            w: store.screenSizeW,
+            h: store.screenSizeH,
           },
           pos: [
             { x: posX, y: posY },
@@ -392,8 +404,8 @@ function addDirectionlessSkillShortcuts(
   posY: number,
   pointerId: number
 ) {
-  posX = Math.round((posX / relativeSize.w) * screenSizeW);
-  posY = Math.round((posY / relativeSize.h) * screenSizeH);
+  posX = Math.round((posX / relativeSize.w) * store.screenSizeW);
+  posY = Math.round((posY / relativeSize.h) * store.screenSizeH);
   addShortcut(
     key,
     // down
@@ -410,8 +422,8 @@ function addDirectionlessSkillShortcuts(
         action: TouchAction.Up,
         pointerId,
         screen: {
-          w: screenSizeW,
-          h: screenSizeH,
+          w: store.screenSizeW,
+          h: store.screenSizeH,
         },
         pos: {
           x: posX,
@@ -442,8 +454,8 @@ function addDirectionalSkillShortcuts(
   range: number,
   pointerId: number
 ) {
-  posX = Math.round((posX / relativeSize.w) * screenSizeW);
-  posY = Math.round((posY / relativeSize.h) * screenSizeH);
+  posX = Math.round((posX / relativeSize.w) * store.screenSizeW);
+  posY = Math.round((posY / relativeSize.h) * store.screenSizeH);
   addShortcut(
     key,
     // down
@@ -458,8 +470,8 @@ function addDirectionalSkillShortcuts(
         action: SwipeAction.NoUp,
         pointerId,
         screen: {
-          w: screenSizeW,
-          h: screenSizeH,
+          w: store.screenSizeW,
+          h: store.screenSizeH,
         },
         pos: [
           { x: posX, y: posY },
@@ -514,8 +526,8 @@ function addSteeringWheelKeyboardShortcuts(
   let loopFlag = false;
   let curPosX = 0;
   let curPosY = 0;
-  posX = Math.round((posX / relativeSize.w) * screenSizeW);
-  posY = Math.round((posY / relativeSize.h) * screenSizeH);
+  posX = Math.round((posX / relativeSize.w) * store.screenSizeW);
+  posY = Math.round((posY / relativeSize.h) * store.screenSizeH);
 
   // calculate the end coordinates of the eight directions of the direction wheel
   let offsetHalf = Math.round(offset / 1.414);
@@ -645,6 +657,7 @@ function addClickShortcuts(key: string, pointerId: number) {
   );
 }
 
+// add shortcut for sight mode
 function addSightShortcuts(
   relativeSize: { w: number; h: number },
   sightKeyMapping: KeySight,
@@ -657,18 +670,18 @@ function addSightShortcuts(
   const sightClientX = 70 + sightKeyMapping.posX;
   const sightClientY = 30 + sightKeyMapping.posY;
   const sightDeviceX = Math.round(
-    (sightKeyMapping.posX / relativeSize.w) * screenSizeW
+    (sightKeyMapping.posX / relativeSize.w) * store.screenSizeW
   );
   const sightDeviceY = Math.round(
-    (sightKeyMapping.posY / relativeSize.h) * screenSizeH
+    (sightKeyMapping.posY / relativeSize.h) * store.screenSizeH
   );
 
   const fireDeviceX = fireKeyMapping
-    ? Math.round((fireKeyMapping.posX / relativeSize.w) * screenSizeW)
+    ? Math.round((fireKeyMapping.posX / relativeSize.w) * store.screenSizeW)
     : 0;
 
   const fireDeviceY = fireKeyMapping
-    ? Math.round((fireKeyMapping.posY / relativeSize.h) * screenSizeH)
+    ? Math.round((fireKeyMapping.posY / relativeSize.h) * store.screenSizeH)
     : 0;
 
   const removeShortcut = (key: string) => {
@@ -715,7 +728,7 @@ function addSightShortcuts(
           fireDeviceX +
             accOffsetX +
             clientxToPosOffsetx(mouseX, sightDeviceX, fireKeyMapping.scaleX),
-            fireDeviceY +
+          fireDeviceY +
             accOffsetY +
             clientyToPosOffsety(mouseY, sightDeviceY, fireKeyMapping.scaleY)
         );
@@ -792,12 +805,23 @@ function addSightShortcuts(
   addShortcut(sightKeyMapping.key, async () => {
     if (mouseLock) {
       // stop sight mode
+
+      // remove box element
+      const mouseRangeBoxElement = document.getElementById("mouseRangeBox");
+      if (mouseRangeBoxElement) {
+        mouseRangeBoxElement.removeEventListener(
+          "mouseleave",
+          moveLeaveHandler
+        );
+        mouseRangeBoxElement.remove();
+      }
+      maskElement.style.cursor = "pointer";
+
+      mouseLock = false;
       loopDownKeyCBMap.delete(sightKeyMapping.key);
       await touchRelateToSight(TouchAction.Up);
       await appWindow.setCursorVisible(true);
-      maskElement.removeEventListener("mouseleave", moveLeaveHandler);
-      maskElement.style.cursor = "pointer";
-      mouseLock = false;
+
       if (msgReactive) {
         msgReactive.destroy();
         msgReactive = null;
@@ -810,10 +834,18 @@ function addSightShortcuts(
       addClickShortcuts("M0", 0);
     } else {
       // start sight mode
-      await appWindow.setCursorVisible(false);
-      maskElement.addEventListener("mouseleave", moveLeaveHandler);
+
+      // create box element
       maskElement.style.cursor = "none";
+      const mouseRangeBoxElement = createMouseRangeBox();
+      mouseRangeBoxElement.addEventListener("contextmenu", (e) =>
+        e.preventDefault()
+      );
+      mouseRangeBoxElement.addEventListener("mouseleave", moveLeaveHandler);
+      document.body.appendChild(mouseRangeBoxElement);
+
       mouseLock = true;
+      await appWindow.setCursorVisible(false);
       msgReactive = message.info(
         t("pages.Mask.sightMode", [sightKeyMapping.key]),
         {
@@ -892,7 +924,7 @@ function addSightShortcuts(
                   sightDeviceX,
                   fireKeyMapping.scaleX
                 ),
-                fireDeviceY +
+              fireDeviceY +
                 clientyToPosOffsety(mouseY, sightDeviceY, fireKeyMapping.scaleY)
             );
             // touch down sight
@@ -917,21 +949,53 @@ function addSightShortcuts(
   });
 }
 
-let screenSizeW: number;
-let screenSizeH: number;
-let maskSizeW: number;
-let maskSizeH: number;
-let mouseX = 0;
-let mouseY = 0;
-let maskElement: HTMLElement;
-let message: ReturnType<typeof useMessage>;
-let t: ReturnType<typeof useI18n>["t"];
+function addSwipeShortcuts(
+  key: string,
+  relativeSize: { w: number; h: number },
+  // pos relative to the mask
+  pos: { x: number; y: number }[],
+  pointerId: number,
+  intervalBetweenPos: number
+) {
+  const newPosList = pos.map((posObj) => {
+    return {
+      x: Math.round((posObj.x / relativeSize.w) * store.screenSizeW),
+      y: Math.round((posObj.y / relativeSize.h) * store.screenSizeH),
+    };
+  });
 
-const downKeyMap: Map<string, boolean> = new Map();
-const downKeyCBMap: Map<string, () => Promise<void>> = new Map();
-const loopDownKeyCBMap: Map<string, () => Promise<void>> = new Map();
-const upKeyCBMap: Map<string, () => Promise<void>> = new Map();
-const cancelAbleKeyList: string[] = [];
+  addShortcut(
+    key,
+    async () => {
+      await swipe({
+        action: SwipeAction.Default,
+        pointerId,
+        screen: {
+          w: store.screenSizeW,
+          h: store.screenSizeH,
+        },
+        pos: newPosList,
+        intervalBetweenPos,
+      });
+    },
+    undefined,
+    undefined
+  );
+}
+
+function createMouseRangeBox(): HTMLElement {
+  const box = document.createElement("div");
+  box.id = "mouseRangeBox";
+  box.style.position = "absolute";
+  box.style.top = "40px";
+  box.style.bottom = "40px";
+  box.style.left = "100px";
+  box.style.right = "100px";
+  box.style.zIndex = "9999";
+  box.style.backgroundColor = "transparent";
+  box.style.cursor = "none";
+  return box;
+}
 
 function handleKeydown(event: KeyboardEvent) {
   event.preventDefault();
@@ -955,7 +1019,10 @@ function handleKeyup(event: KeyboardEvent) {
 }
 
 function handleMouseDown(event: MouseEvent) {
-  if (event.target !== maskElement) return;
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  if (target.id !== "maskElement" && target.id !== "mouseRangeBox") return;
+
   mouseX = event.clientX;
   mouseY = event.clientY;
   event.preventDefault();
@@ -1001,6 +1068,94 @@ function handleMouseWheel(event: WheelEvent) {
     // WheelUp
     downKeyCBMap.get("WheelUp")?.();
     upKeyCBMap.get("WheelUp")?.();
+  }
+}
+
+export class KeyInputHandler {
+  private static readonly repeatCounter: Map<number, number> = new Map();
+  private static msgReactive: MessageReactive | null = null;
+  private static handler(event: KeyboardEvent) {
+    const keycode = KeyToCodeMap.get(event.code as UIEventsCode);
+    if (!keycode) {
+      return;
+    }
+    let action: AndroidKeyEventAction;
+    let repeatCount = 0;
+    if (event.type === "keydown") {
+      if (event.getModifierState("Control") && event.code === "KeyV") return;
+
+      action = AndroidKeyEventAction.AKEY_EVENT_ACTION_DOWN;
+      if (event.repeat) {
+        let count = KeyInputHandler.repeatCounter.get(keycode);
+        if (typeof count !== "number") {
+          count = 1;
+        } else {
+          count++;
+        }
+        repeatCount = count;
+        KeyInputHandler.repeatCounter.set(keycode, count);
+      }
+    } else if (event.type === "keyup") {
+      if (event.getModifierState("Control") && event.code === "KeyV") {
+        (async () => {
+          const text = await readText();
+          await sendSetClipboard({
+            sequence: Math.floor(Math.random() * 10000),
+            text,
+            paste: true,
+          });
+        })();
+        return;
+      }
+
+      action = AndroidKeyEventAction.AKEY_EVENT_ACTION_UP;
+      KeyInputHandler.repeatCounter.delete(keycode);
+    } else {
+      return;
+    }
+    const metaState =
+      (event.getModifierState("Alt") ? AndroidMetastate.AMETA_ALT_ON : 0) |
+      (event.getModifierState("Shift") ? AndroidMetastate.AMETA_SHIFT_ON : 0) |
+      (event.getModifierState("Control") ? AndroidMetastate.AMETA_CTRL_ON : 0) |
+      (event.getModifierState("Meta") ? AndroidMetastate.AMETA_META_ON : 0) |
+      (event.getModifierState("CapsLock")
+        ? AndroidMetastate.AMETA_CAPS_LOCK_ON
+        : 0) |
+      (event.getModifierState("ScrollLock")
+        ? AndroidMetastate.AMETA_SCROLL_LOCK_ON
+        : 0) |
+      (event.getModifierState("NumLock")
+        ? AndroidMetastate.AMETA_NUM_LOCK_ON
+        : 0);
+
+    sendInjectKeycode({
+      action,
+      keycode,
+      repeat: repeatCount,
+      metastate: metaState,
+    });
+    event.preventDefault();
+  }
+  public static addEventListener() {
+    KeyInputHandler.msgReactive = message.info(t("pages.Mask.keyInputMode"), {
+      duration: 0,
+      closable: true,
+      onClose: () => {
+        KeyInputHandler.removeEventListener();
+        listenToEvent(true);
+        store.keyInputFlag = false;
+      },
+    });
+    window.addEventListener("keydown", KeyInputHandler.handler);
+    window.addEventListener("keyup", KeyInputHandler.handler);
+  }
+  public static removeEventListener() {
+    if (KeyInputHandler.msgReactive) {
+      KeyInputHandler.msgReactive.destroy();
+      KeyInputHandler.msgReactive = null;
+    }
+    window.removeEventListener("keydown", KeyInputHandler.handler);
+    window.removeEventListener("keyup", KeyInputHandler.handler);
   }
 }
 
@@ -1062,23 +1217,23 @@ function addShortcut(
  *   {
  *    type: "touch",
  *    // op, pointerId, posX, posY
- *    args: ["down", 5, ["mouse", -10], 600],
+ *    args: ["down", 5, ["mouse", -10], 600]
  *  },
  *  // sleep 1000ms
  *  {
  *   type: "sleep",
  *  // time(ms)
- *   args: [1000],
+ *   args: [1000]
  *  },
  *  // touch up
  *  {
  *  type: "touch",
- *  args: ["up", 5, ["mouse", 10], 600],
+ *  args: ["up", 5, ["mouse", 10], 600]
  *  },
  *  // touch 1000ms
  *  {
  *  type: "touch",
- *  args: ["default", 5, ["mouse", 10], 600, 1000],
+ *  args: ["default", 5, ["mouse", 10], 600, 1000]
  *  },
  *  // swipe
  *  {
@@ -1089,18 +1244,17 @@ function addShortcut(
  *     [
  *       [
  *         ["mouse", 100],
- *         ["mouse", -100],
+ *         ["mouse", -100]
  *       ],
- *       ["mouse", "mouse"],
+ *       ["mouse", "mouse"]
  *     ],
- *     1000,
- *   ],
+ *     1000
+ *   ]
  *  },
- *  // input-text
+ *  // key-input-mode
  *  {
- *    type: "input-text",
- *    // 1:on, 2:off
- *    args: [1]
+ *    type: "key-input-mode",
+ *    args: []
  *  }
  * ]);
  */
@@ -1166,20 +1320,24 @@ async function execMacro(
             action: swipeAction,
             pointerId: cmd.args[1],
             screen: {
-              w: screenSizeW,
-              h: screenSizeH,
+              w: store.screenSizeW,
+              h: store.screenSizeH,
             },
             pos: calculateMacroPosList(cmd.args[2], relativeSize),
             intervalBetweenPos: cmd.args[3],
           });
           break;
-        case "input-text":
-          if (cmd.args[0] === 1) {
+        case "key-input-mode":
+          if (!store.keyInputFlag) {
             // on
-            useGlobalStore().showInputBox(true);
+            unlistenToEvent(true);
+            KeyInputHandler.addEventListener();
+            store.keyInputFlag = true;
           } else {
             // off
-            useGlobalStore().showInputBox(false);
+            KeyInputHandler.removeEventListener();
+            listenToEvent(true);
+            store.keyInputFlag = false;
           }
           break;
         default:
@@ -1262,6 +1420,16 @@ function applyKeyMappingConfigShortcuts(
             item.posX,
             item.posY,
             item.pointerId
+          );
+          break;
+        case "Swipe":
+          asType<KeySwipe>(item);
+          addSwipeShortcuts(
+            item.key,
+            relativeSize,
+            item.pos,
+            item.pointerId,
+            item.intervalBetweenPos
           );
           break;
         case "TriggerWhenPressedSkill":
@@ -1356,8 +1524,8 @@ async function touchX(
     action,
     pointerId,
     screen: {
-      w: screenSizeW,
-      h: screenSizeH,
+      w: store.screenSizeW,
+      h: store.screenSizeH,
     },
     pos: {
       x: posX,
@@ -1367,9 +1535,11 @@ async function touchX(
   });
 }
 
-export function listenToEvent() {
+export function listenToEvent(onlyKeyEvent = false) {
   window.addEventListener("keydown", handleKeydown);
   window.addEventListener("keyup", handleKeyup);
+  if (onlyKeyEvent) return;
+
   window.addEventListener("mousedown", handleMouseDown);
   window.addEventListener("mousemove", handleMouseMove);
   window.addEventListener("mouseup", handleMouseUp);
@@ -1378,9 +1548,11 @@ export function listenToEvent() {
   execLoopCB();
 }
 
-export function unlistenToEvent() {
+export function unlistenToEvent(onlyKeyEvent = false) {
   window.removeEventListener("keydown", handleKeydown);
   window.removeEventListener("keyup", handleKeyup);
+  if (onlyKeyEvent) return;
+
   window.removeEventListener("mousedown", handleMouseDown);
   window.removeEventListener("mousemove", handleMouseMove);
   window.removeEventListener("mouseup", handleMouseUp);
@@ -1397,26 +1569,31 @@ export function clearShortcuts() {
   cancelAbleKeyList.length = 0;
 }
 
-export function updateScreenSizeAndMaskArea(
-  screenSize: [number, number],
-  maskArea: [number, number]
-) {
-  screenSizeW = screenSize[0];
-  screenSizeH = screenSize[1];
-  maskSizeW = maskArea[0];
-  maskSizeH = maskArea[1];
-}
-
 export function applyShortcuts(
-  element: HTMLElement,
   keyMappingConfig: KeyMappingConfig,
+  globalStore: ReturnType<typeof useGlobalStore>,
   messageAPI: ReturnType<typeof useMessage>,
   i18nT: ReturnType<typeof useI18n>["t"]
 ) {
-  maskElement = element;
+  store = globalStore;
+  maskElement = document.getElementById("maskElement") as HTMLElement;
   message = messageAPI;
   t = i18nT;
+
   addClickShortcuts("M0", 0);
 
   return applyKeyMappingConfigShortcuts(keyMappingConfig);
 }
+
+let mouseX = 0;
+let mouseY = 0;
+let store: ReturnType<typeof useGlobalStore>;
+let maskElement: HTMLElement;
+let message: ReturnType<typeof useMessage>;
+let t: ReturnType<typeof useI18n>["t"];
+
+const downKeyMap: Map<string, boolean> = new Map();
+const downKeyCBMap: Map<string, () => Promise<void>> = new Map();
+const loopDownKeyCBMap: Map<string, () => Promise<void>> = new Map();
+const upKeyCBMap: Map<string, () => Promise<void>> = new Map();
+const cancelAbleKeyList: string[] = [];

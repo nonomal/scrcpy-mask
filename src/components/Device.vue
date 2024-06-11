@@ -21,7 +21,6 @@ import {
 } from "../invoke";
 import {
   NH4,
-  NP,
   NInput,
   NInputNumber,
   NButton,
@@ -30,7 +29,6 @@ import {
   NEmpty,
   NTooltip,
   NFlex,
-  NFormItem,
   NIcon,
   NSpin,
   NScrollbar,
@@ -42,11 +40,12 @@ import {
 } from "naive-ui";
 import { CloseCircle, InformationCircle, Refresh } from "@vicons/ionicons5";
 import { UnlistenFn, listen } from "@tauri-apps/api/event";
-import { Store } from "@tauri-apps/plugin-store";
 import { shutdown } from "../frontcommand/scrcpyMaskCmd";
 import { useGlobalStore } from "../store/global";
 import { useI18n } from "vue-i18n";
 import { closeExternalControl, connectExternalControl } from "../websocket";
+import { LogicalSize, getCurrent } from "@tauri-apps/api/window";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 
 const { t } = useI18n();
 const dialog = useDialog();
@@ -57,12 +56,13 @@ const port = ref(27183);
 const wireless_address = ref("");
 const ws_address = ref("");
 
-const localStore = new Store("store.bin");
-
 //#region listener
 let deviceWaitForMetadataTask: ((deviceName: string) => void) | null = null;
+let deviceWaitForScreenSizeTask: ((w: number, h: number) => void) | null = null;
 
 let unlisten: UnlistenFn | undefined;
+let lastClipboard = "";
+
 onMounted(async () => {
   unlisten = await listen("device-reply", (event) => {
     try {
@@ -72,10 +72,33 @@ onMounted(async () => {
           deviceWaitForMetadataTask?.(payload.deviceName);
           break;
         case "ClipboardChanged":
-          console.log("ClipboardChanged", payload.clipboard);
+          if (payload.clipboard === lastClipboard) break;
+          lastClipboard = payload.clipboard;
+          writeText(payload.clipboard);
+          console.log(payload);
           break;
         case "ClipboardSetAck":
-          console.log("ClipboardSetAck", payload.sequence);
+          break;
+        case "DeviceRotation":
+          if (deviceWaitForScreenSizeTask) {
+            deviceWaitForScreenSizeTask(payload.width, payload.height);
+          } else {
+            store.screenSizeW = payload.width;
+            store.screenSizeH = payload.height;
+            message.info(t("pages.Device.rotation", [payload.rotation * 90]));
+          }
+          if (store.rotation.enable) {
+            let maskW: number;
+            let maskH: number;
+            if (payload.width >= payload.height) {
+              maskW = Math.round(store.rotation.horizontalLength);
+              maskH = Math.round(maskW * (payload.height / payload.width));
+            } else {
+              maskH = Math.round(store.rotation.verticalLength);
+              maskW = Math.round(maskH * (payload.width / payload.height));
+            }
+            getCurrent().setSize(new LogicalSize(maskW + 70, maskH + 30));
+          }
           break;
         default:
           console.log("Unknown reply", payload);
@@ -100,6 +123,8 @@ onActivated(async () => {
     // restore controledDevice if client exists
     if (curClientInfo) {
       message.warning(t("pages.Device.alreadyControled"));
+      store.screenSizeW = curClientInfo.width;
+      store.screenSizeH = curClientInfo.height;
       store.controledDevice = {
         scid: curClientInfo.scid,
         deviceName: curClientInfo.device_name,
@@ -202,7 +227,7 @@ function onMenuClickoutside() {
 async function deviceControl() {
   let curClientInfo = await getCurClientInfo();
   if (curClientInfo) {
-    message.warning(t("pages.Device.alreadyControled"));
+    message.error(t("pages.Device.alreadyControled"));
     store.controledDevice = {
       scid: curClientInfo.scid,
       deviceName: curClientInfo.device_name,
@@ -216,24 +241,6 @@ async function deviceControl() {
     port.value = 27183;
   }
 
-  if (!(store.screenSizeW > 0) || !(store.screenSizeH > 0)) {
-    message.error(t("pages.Device.deviceControl.inputScreenSize"));
-    store.screenSizeW = 0;
-    store.screenSizeH = 0;
-    store.hideLoading();
-    return;
-  }
-
-  if (store.controledDevice) {
-    message.error(t("pages.Device.deviceControl.closeCurDevice"));
-    store.hideLoading();
-    return;
-  }
-
-  localStore.set("screenSize", {
-    sizeW: store.screenSizeW,
-    sizeH: store.screenSizeH,
-  });
   message.info(t("pages.Device.deviceControl.controlInfo"));
 
   const device = devices.value[rowIndex];
@@ -263,11 +270,26 @@ async function deviceControl() {
       deviceName,
       deviceID: device.id,
     };
-    nextTick(() => {
-      deviceWaitForMetadataTask = null;
-      clearTimeout(id);
-      store.hideLoading();
-    });
+    deviceWaitForMetadataTask = null;
+    if (!deviceWaitForScreenSizeTask) {
+      nextTick(() => {
+        clearTimeout(id);
+        store.hideLoading();
+      });
+    }
+  };
+
+  // add cb for screen size
+  deviceWaitForScreenSizeTask = (w: number, h: number) => {
+    store.screenSizeW = w;
+    store.screenSizeH = h;
+    deviceWaitForScreenSizeTask = null;
+    if (!deviceWaitForMetadataTask) {
+      nextTick(() => {
+        clearTimeout(id);
+        store.hideLoading();
+      });
+    }
   };
 }
 
@@ -276,7 +298,8 @@ async function deviceGetScreenSize() {
   const size = await getDeviceScreenSize(id);
   store.hideLoading();
   message.success(
-    t("pages.Device.deviceGetScreenSize") + `${size[0]} x ${size[1]}`
+    t("pages.Device.deviceGetScreenSize") + `${size[0]} x ${size[1]}`,
+    { keepAliveOnHover: true }
   );
 }
 
@@ -296,7 +319,12 @@ async function onMenuSelect(key: string) {
 
 async function refreshDevices() {
   store.showLoading();
-  devices.value = await adbDevices();
+  try {
+    devices.value = await adbDevices();
+  } catch (e) {
+    message.error(t("pages.Device.adbDeviceError"));
+    console.error(e);
+  }
   store.hideLoading();
 }
 
@@ -307,8 +335,13 @@ async function connectDevice() {
   }
 
   store.showLoading();
-  message.info(await adbConnect(wireless_address.value));
-  await refreshDevices();
+  try {
+    message.info(await adbConnect(wireless_address.value));
+    await refreshDevices();
+  } catch (e) {
+    message.error("t('pages.Device.adbConnectError')");
+    console.error(e);
+  }
 }
 
 function connectWS() {
@@ -368,26 +401,6 @@ function closeWS() {
             $t("pages.Device.wsConnect")
           }}</NButton>
         </NInputGroup>
-        <NH4 prefix="bar">{{ $t("pages.Device.deviceSize.title") }}</NH4>
-        <NFlex justify="left" align="center">
-          <NFormItem :label="$t('pages.Device.deviceSize.width')">
-            <NInputNumber
-              v-model:value="store.screenSizeW"
-              :placeholder="$t('pages.Device.deviceSize.widthPlaceholder')"
-              :min="0"
-              :disabled="store.controledDevice !== null"
-            />
-          </NFormItem>
-          <NFormItem :label="$t('pages.Device.deviceSize.height')">
-            <NInputNumber
-              v-model:value="store.screenSizeH"
-              :placeholder="$t('pages.Device.deviceSize.heightPlaceholder')"
-              :min="0"
-              :disabled="store.controledDevice !== null"
-            />
-          </NFormItem>
-        </NFlex>
-        <NP>{{ $t("pages.Device.deviceSize.tip") }}</NP>
         <NH4 prefix="bar">{{ $t("pages.Device.controledDevice") }}</NH4>
         <div class="controled-device-list">
           <NEmpty

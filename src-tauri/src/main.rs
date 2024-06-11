@@ -13,9 +13,8 @@ use tauri::Manager;
 
 #[tauri::command]
 /// get devices info list
-fn adb_devices(app: tauri::AppHandle) -> Result<Vec<Device>, String> {
-    let dir = app.path().resource_dir().unwrap().join("resource");
-    match Adb::cmd_devices(&dir) {
+fn adb_devices() -> Result<Vec<Device>, String> {
+    match Adb::cmd_devices() {
         Ok(devices) => Ok(devices),
         Err(e) => Err(e.to_string()),
     }
@@ -23,15 +22,8 @@ fn adb_devices(app: tauri::AppHandle) -> Result<Vec<Device>, String> {
 
 #[tauri::command]
 /// forward local port to the device port
-fn forward_server_port(
-    app: tauri::AppHandle,
-    id: String,
-    scid: String,
-    port: u16,
-) -> Result<(), String> {
-    let dir = app.path().resource_dir().unwrap().join("resource");
-
-    match ScrcpyClient::forward_server_port(&dir, &id, &scid, port) {
+fn forward_server_port(id: String, scid: String, port: u16) -> Result<(), String> {
+    match ScrcpyClient::forward_server_port(&id, &scid, port) {
         Ok(_) => Ok(()),
         Err(e) => Err(e.to_string()),
     }
@@ -66,12 +58,11 @@ fn start_scrcpy_server(
         scid.clone(),
     ));
 
-    let dir = app.path().resource_dir().unwrap().join("resource");
     let version = ScrcpyClient::get_scrcpy_version();
 
     // start scrcpy server
     tokio::spawn(async move {
-        ScrcpyClient::shell_start_server(&dir, &id, &scid, &version).unwrap();
+        ScrcpyClient::shell_start_server(&id, &scid, &version).unwrap();
     });
 
     // connect to scrcpy server
@@ -100,8 +91,8 @@ fn start_scrcpy_server(
             let sender = front_msg_sender.clone();
             // println!("收到front-command: {}", event.payload());
             tokio::spawn(async move {
-                if let Err(e) = sender.send(event.payload().into()).await {
-                    println!("front-command转发失败: {}", e);
+                if let Err(_) = sender.send(event.payload().into()).await {
+                    println!("front-command forwarding failure, please restart the program !");
                 };
             });
         });
@@ -131,9 +122,8 @@ fn get_cur_client_info() -> Result<Option<share::ClientInfo>, String> {
 
 #[tauri::command]
 /// get device screen size
-fn get_device_screen_size(id: String, app: tauri::AppHandle) -> Result<(u32, u32), String> {
-    let dir = app.path().resource_dir().unwrap().join("resource");
-    match ScrcpyClient::get_device_screen_size(&dir, &id) {
+fn get_device_screen_size(id: String) -> Result<(u32, u32), String> {
+    match ScrcpyClient::get_device_screen_size(&id) {
         Ok(size) => Ok(size),
         Err(e) => Err(e.to_string()),
     }
@@ -141,9 +131,8 @@ fn get_device_screen_size(id: String, app: tauri::AppHandle) -> Result<(u32, u32
 
 #[tauri::command]
 /// connect to wireless device
-fn adb_connect(address: String, app: tauri::AppHandle) -> Result<String, String> {
-    let dir = app.path().resource_dir().unwrap().join("resource");
-    match Adb::cmd_connect(&dir, &address) {
+fn adb_connect(address: String) -> Result<String, String> {
+    match Adb::cmd_connect(&address) {
         Ok(res) => Ok(res),
         Err(e) => Err(e.to_string()),
     }
@@ -160,9 +149,39 @@ fn load_default_keyconfig(app: tauri::AppHandle) -> Result<String, String> {
     }
 }
 
+#[tauri::command]
+fn check_adb_available() -> Result<(), String> {
+    match Adb::cmd_base().output() {
+        Ok(_) => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+fn set_adb_path(adb_path: String, app: tauri::AppHandle) -> Result<(), String> {
+    let app_h = app.app_handle().clone();
+    let stores = app_h.state::<tauri_plugin_store::StoreCollection<tauri::Wry>>();
+    let path = std::path::PathBuf::from("store.bin");
+    let store_res: Result<(), tauri_plugin_store::Error> =
+        tauri_plugin_store::with_store(app, stores, path, |store| {
+            store.insert(
+                "adbPath".to_string(),
+                serde_json::Value::String(adb_path.clone()),
+            )?;
+            *share::ADB_PATH.lock().unwrap() = adb_path;
+            Ok(())
+        });
+
+    match store_res {
+        Ok(_) => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 #[tokio::main]
 async fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_process::init())
@@ -171,24 +190,45 @@ async fn main() {
             let stores = app
                 .app_handle()
                 .state::<tauri_plugin_store::StoreCollection<tauri::Wry>>();
-            let path = std::path::PathBuf::from("store.bin");
+            let path: std::path::PathBuf = std::path::PathBuf::from("store.bin");
             tauri_plugin_store::with_store(app.app_handle().clone(), stores, path, |store| {
+                // load adb path
+                match store.get("adbPath") {
+                    Some(value) => {
+                        *share::ADB_PATH.lock().unwrap() = value.as_str().unwrap().to_string()
+                    }
+                    None => store
+                        .insert(
+                            "adbPath".to_string(),
+                            serde_json::Value::String("adb".to_string()),
+                        )
+                        .unwrap(),
+                };
+
                 // restore window position and size
                 match store.get("maskArea") {
                     Some(value) => {
-                        let pos_x = value["posX"].as_i64().unwrap_or(100);
-                        let pos_y = value["posY"].as_i64().unwrap_or(100);
+                        let pos_x = value["posX"].as_i64();
+                        let pos_y = value["posY"].as_i64();
                         let size_w = value["sizeW"].as_i64().unwrap_or(800);
                         let size_h = value["sizeH"].as_i64().unwrap_or(600);
+
                         let main_window: tauri::WebviewWindow =
                             app.get_webview_window("main").unwrap();
+
                         main_window.set_zoom(1.).unwrap_or(());
-                        main_window
-                            .set_position(tauri::Position::Logical(tauri::LogicalPosition {
-                                x: (pos_x - 70) as f64,
-                                y: (pos_y - 30) as f64,
-                            }))
-                            .unwrap();
+
+                        if pos_x.is_none() || pos_y.is_none() {
+                            main_window.center().unwrap_or(());
+                        } else {
+                            main_window
+                                .set_position(tauri::Position::Logical(tauri::LogicalPosition {
+                                    x: (pos_x.unwrap() - 70) as f64,
+                                    y: (pos_y.unwrap() - 30) as f64,
+                                }))
+                                .unwrap();
+                        }
+
                         main_window
                             .set_size(tauri::Size::Logical(tauri::LogicalSize {
                                 width: (size_w + 70) as f64,
@@ -199,22 +239,14 @@ async fn main() {
                     None => {
                         let main_window: tauri::WebviewWindow =
                             app.get_webview_window("main").unwrap();
+
+                        main_window.center().unwrap_or(());
+
                         main_window
                             .set_size(tauri::Size::Logical(tauri::LogicalSize {
                                 width: (800 + 70) as f64,
                                 height: (600 + 30) as f64,
                             }))
-                            .unwrap();
-                        store
-                            .insert(
-                                "maskArea".to_string(),
-                                serde_json::json!({
-                                    "posX": 0,
-                                    "posY": 0,
-                                    "sizeW": 800,
-                                    "sizeH": 600
-                                }),
-                            )
                             .unwrap();
                     }
                 }
@@ -241,7 +273,9 @@ async fn main() {
             get_cur_client_info,
             get_device_screen_size,
             adb_connect,
-            load_default_keyconfig
+            load_default_keyconfig,
+            check_adb_available,
+            set_adb_path
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

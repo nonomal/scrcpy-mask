@@ -33,6 +33,8 @@ export async function getCurClientInfo(): Promise<{
   device_name: string;
   device_id: string;
   scid: string;
+  width: number;
+  height: number;
 } | null> {
   return await invoke("get_cur_client_info");
 }
@@ -49,6 +51,14 @@ export async function adbConnect(address: string): Promise<string> {
 
 export async function loadDefaultKeyconfig(): Promise<string> {
   return await invoke("load_default_keyconfig");
+}
+
+export async function checkAdbAvailable(): Promise<void> {
+  return await invoke("check_adb_available");
+}
+
+export async function setAdbPath(path: string): Promise<string> {
+  return await invoke("set_adb_path", { adbPath: path });
 }
 
 export type { Device };

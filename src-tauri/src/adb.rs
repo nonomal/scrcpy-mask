@@ -1,7 +1,5 @@
-use crate::resource::{ResHelper, ResourceName};
 use std::{
     io::BufRead,
-    path::PathBuf,
     process::{Child, Command, Stdio},
 };
 
@@ -9,6 +7,8 @@ use std::{
 use std::os::windows::process::CommandExt;
 
 use anyhow::{Context, Ok, Result};
+
+use crate::share;
 
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct Device {
@@ -18,8 +18,8 @@ pub struct Device {
 
 impl Device {
     /// execute "adb push" to push file from src to des
-    pub fn cmd_push(res_dir: &PathBuf, id: &str, src: &str, des: &str) -> Result<String> {
-        let mut adb_command = Adb::cmd_base(res_dir);
+    pub fn cmd_push(id: &str, src: &str, des: &str) -> Result<String> {
+        let mut adb_command = Adb::cmd_base();
         let res = adb_command
             .args(&["-s", id, "push", src, des])
             .output()
@@ -28,8 +28,8 @@ impl Device {
     }
 
     /// execute "adb reverse" to reverse the device port to local port
-    pub fn cmd_reverse(res_dir: &PathBuf, id: &str, remote: &str, local: &str) -> Result<()> {
-        let mut adb_command = Adb::cmd_base(res_dir);
+    pub fn cmd_reverse(id: &str, remote: &str, local: &str) -> Result<()> {
+        let mut adb_command = Adb::cmd_base();
         adb_command
             .args(&["-s", id, "reverse", remote, local])
             .output()
@@ -38,8 +38,8 @@ impl Device {
     }
 
     /// execute "adb forward" to forward the local port to the device
-    pub fn cmd_forward(res_dir: &PathBuf, id: &str, local: &str, remote: &str) -> Result<()> {
-        let mut adb_command = Adb::cmd_base(res_dir);
+    pub fn cmd_forward(id: &str, local: &str, remote: &str) -> Result<()> {
+        let mut adb_command = Adb::cmd_base();
         adb_command
             .args(&["-s", id, "forward", local, remote])
             .output()
@@ -48,8 +48,8 @@ impl Device {
     }
 
     /// execute "adb shell" to execute shell command on the device
-    pub fn cmd_shell(res_dir: &PathBuf, id: &str, shell_args: &[&str]) -> Result<Child> {
-        let mut adb_command = Adb::cmd_base(res_dir);
+    pub fn cmd_shell(id: &str, shell_args: &[&str]) -> Result<Child> {
+        let mut adb_command = Adb::cmd_base();
         let mut args = vec!["-s", id, "shell"];
         args.extend_from_slice(shell_args);
         Ok(adb_command
@@ -60,8 +60,8 @@ impl Device {
     }
 
     /// execute "adb shell wm size" to get screen size
-    pub fn cmd_screen_size(res_dir: &PathBuf, id: &str) -> Result<(u32, u32)> {
-        let mut adb_command = Adb::cmd_base(res_dir);
+    pub fn cmd_screen_size(id: &str) -> Result<(u32, u32)> {
+        let mut adb_command = Adb::cmd_base();
         let output = adb_command
             .args(&["-s", id, "shell", "wm", "size"])
             .output()
@@ -86,22 +86,21 @@ pub struct Adb;
 /// Module to execute adb command and fetch output.
 /// But some output of command won't be output, like adb service startup information.
 impl Adb {
-    fn cmd_base(res_dir: &PathBuf) -> Command {
+    pub fn cmd_base() -> Command {
+        let adb_path = share::ADB_PATH.lock().unwrap().clone();
         #[cfg(target_os = "windows")]
         {
-            let mut cmd = Command::new(ResHelper::get_file_path(res_dir, ResourceName::Adb));
+            let mut cmd = Command::new(adb_path);
             cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-            cmd
+            return cmd;
         }
         #[cfg(not(target_os = "windows"))]
-        {
-            Command::new(ResHelper::get_file_path(res_dir, ResourceName::Adb))
-        }
+        Command::new(adb_path)
     }
 
     /// execute "adb devices" and return devices list
-    pub fn cmd_devices(res_dir: &PathBuf) -> Result<Vec<Device>> {
-        let mut adb_command = Adb::cmd_base(res_dir);
+    pub fn cmd_devices() -> Result<Vec<Device>> {
+        let mut adb_command = Adb::cmd_base();
         let output = adb_command
             .args(&["devices"])
             .output()
@@ -128,8 +127,8 @@ impl Adb {
     }
 
     /// execute "adb kill-server"
-    pub fn cmd_kill_server(res_dir: &PathBuf) -> Result<()> {
-        let mut adb_command = Adb::cmd_base(res_dir);
+    pub fn cmd_kill_server() -> Result<()> {
+        let mut adb_command = Adb::cmd_base();
         adb_command
             .args(&["kill-server"])
             .output()
@@ -138,8 +137,8 @@ impl Adb {
     }
 
     /// execute "adb reverse --remove-all"
-    pub fn cmd_reverse_remove(res_dir: &PathBuf) -> Result<()> {
-        let mut adb_command = Adb::cmd_base(res_dir);
+    pub fn cmd_reverse_remove() -> Result<()> {
+        let mut adb_command = Adb::cmd_base();
         adb_command
             .args(&["reverse", " --remove-all"])
             .output()
@@ -148,8 +147,8 @@ impl Adb {
     }
 
     /// execute "adb forward --remove-all"
-    pub fn cmd_forward_remove(res_dir: &PathBuf) -> Result<()> {
-        let mut adb_command = Adb::cmd_base(res_dir);
+    pub fn cmd_forward_remove() -> Result<()> {
+        let mut adb_command = Adb::cmd_base();
         adb_command
             .args(&["forward", " --remove-all"])
             .output()
@@ -158,8 +157,8 @@ impl Adb {
     }
 
     /// execute "adb start-server"
-    pub fn cmd_start_server(res_dir: &PathBuf) -> Result<()> {
-        let mut adb_command = Adb::cmd_base(res_dir);
+    pub fn cmd_start_server() -> Result<()> {
+        let mut adb_command = Adb::cmd_base();
         adb_command
             .args(&["start-server"])
             .output()
@@ -167,8 +166,8 @@ impl Adb {
         Ok(())
     }
 
-    pub fn cmd_connect(res_dir: &PathBuf, address: &str) -> Result<String> {
-        let mut adb_command = Adb::cmd_base(res_dir);
+    pub fn cmd_connect(address: &str) -> Result<String> {
+        let mut adb_command = Adb::cmd_base();
         let output = adb_command
             .args(&["connect", address])
             .output()
@@ -177,11 +176,4 @@ impl Adb {
         let res = String::from_utf8(output.stdout)?;
         Ok(res)
     }
-}
-
-#[test]
-fn t() {
-    let res_dir = PathBuf::from("/Users/akichase/Projects/github/scrcpy-mask/src-tauri/resource/");
-    let res = Adb::cmd_connect(&res_dir, "127.0.0.1:1234").unwrap();
-    println!("{}", res)
 }

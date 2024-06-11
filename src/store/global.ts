@@ -27,9 +27,8 @@ export const useGlobalStore = defineStore("global", () => {
   const controledDevice: Ref<ControledDevice | null> = ref(null);
   const editKeyMappingList: Ref<KeyMapping[]> = ref([]);
 
-  const showInputBox: (_: boolean) => void = (_: boolean) => {};
-
   let checkUpdate: () => Promise<void> = async () => {};
+  let checkAdb: () => Promise<void> = async () => {};
 
   function applyEditKeyMappingList(): boolean {
     const set = new Set<string>();
@@ -71,9 +70,17 @@ export const useGlobalStore = defineStore("global", () => {
 
   const externalControlled = ref(false);
 
-  // persistent storage
   const screenSizeW: Ref<number> = ref(0);
   const screenSizeH: Ref<number> = ref(0);
+
+  const keyInputFlag = ref(false);
+
+  const maskSizeW: Ref<number> = ref(0);
+  const maskSizeH: Ref<number> = ref(0);
+
+  const screenStreamClientId = ref("scrcpy-mask");
+
+  // persistent storage
   const keyMappingConfigList: Ref<KeyMappingConfig[]> = ref([]);
   const curKeyMappingIndex = ref(0);
   const maskButton = ref({
@@ -82,25 +89,48 @@ export const useGlobalStore = defineStore("global", () => {
   });
   const checkUpdateAtStart = ref(true);
 
+  const screenStream = ref({
+    enable: false,
+    address: "",
+  });
+
+  const rotation = ref({
+    enable: true,
+    verticalLength: 600,
+    horizontalLength: 800,
+  });
+
+  const clipboardSync = ref({
+    syncFromDevice: true,
+    pasteFromPC: true,
+  });
+
   return {
     // persistent storage
-    screenSizeW,
-    screenSizeH,
     keyMappingConfigList,
     curKeyMappingIndex,
     maskButton,
     checkUpdateAtStart,
     externalControlled,
+    screenStream,
+    rotation,
+    clipboardSync,
     // in-memory storage
+    screenStreamClientId,
+    maskSizeW,
+    maskSizeH,
+    screenSizeW,
+    screenSizeH,
+    keyInputFlag,
     showLoading,
     hideLoading,
     showLoadingRef,
     controledDevice,
     editKeyMappingList,
-    showInputBox,
     applyEditKeyMappingList,
     resetEditKeyMappingList,
     setKeyMappingIndex,
     checkUpdate,
+    checkAdb,
   };
 });

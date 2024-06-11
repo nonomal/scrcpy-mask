@@ -14,9 +14,7 @@
         "screen": "Get screen size"
       },
       "deviceControl": {
-        "inputScreenSize": "Please enter the screen size of the current control device correctly",
-        "closeCurDevice": "Please close the current control device first",
-        "controlInfo": "The screen size has been saved and the control service is starting. Please keep the device screen on.",
+        "controlInfo": "The control service is starting. Please keep the device screen on.",
         "connectTimeout": "Device connection timeout"
       },
       "deviceGetScreenSize": "Device screen size: ",
@@ -25,14 +23,7 @@
       "wireless": "Wireless connection",
       "wirelessPlaceholder": "Wireless connection address",
       "connect": "Connect",
-      "deviceSize": {
-        "title": "Device screen size",
-        "width": "Width",
-        "widthPlaceholder": "Screen width",
-        "height": "Height",
-        "heightPlaceholder": "Screen height",
-        "tip": "Tip: Please enter the screen size of the current control device correctly. This is a necessary parameter to successfully send touch events."
-      },
+      "deviceSize": {},
       "controledDevice": "Controlled device",
       "availableDevice": "Available devices",
       "noControledDevice": "No Controled Device",
@@ -42,10 +33,12 @@
       "wsAddress": "Websocket address",
       "inputWsAddress": "Please enter the Websocket address",
       "wsClose": "Close",
-      "wsConnect": "Control"
+      "wsConnect": "Control",
+      "adbDeviceError": "Unable to get available devices",
+      "adbConnectError": "Wireless connection failed",
+      "rotation": "Device rotation {0}°"
     },
     "Mask": {
-      "inputBoxPlaceholder": "Input text and then press enter/esc",
       "keyconfigException": "The key mapping config is abnormal, please delete this config",
       "blankConfig": "Blank config",
       "checkUpdate": {
@@ -62,13 +55,16 @@
         "content": "Please go to the device page to control any device",
         "positiveText": "To control"
       },
-      "sightMode": "Mouse is locked, press {0} to unlock"
+      "sightMode": "Mouse is locked, press {0} to unlock",
+      "checkAdb": "adb is not available and the software cannot run normally. Fill in the path of the adb file in the setup page, or add the folder where it is located to the Path environment variable.: {0}",
+      "keyInputMode": "Has entered the keystroke input mode, close this message to exit."
     },
     "Setting": {
       "tabs": {
         "basic": "Basic settings",
         "mask": "Mask setting",
-        "about": "About"
+        "about": "About",
+        "data": "Data management"
       },
       "Mask": {
         "areaFormMissing": {
@@ -80,9 +76,9 @@
         "areaSaved": "Mask area saved",
         "incorrectArea": "Please enter the coordinates and size of the mask correctly",
         "buttonPrompts": "Button prompts",
-        "ifButtonPrompts": "Whether to display",
+        "ifButtonPrompts": "Show key prompts",
         "opacity": "Opacity",
-        "areaAdjust": "Mask adjustment",
+        "areaAdjust": "Mask area",
         "areaPlaceholder": {
           "x": "X coordinate of upper left corner"
         },
@@ -91,9 +87,28 @@
           "w": "Mask width",
           "h": "Mask height"
         },
-        "areaTip": "Tip: The mask size and device size will be used for coordinate conversion, please ensure the accuracy of the size"
+        "rotation": {
+          "title": "Device rotation",
+          "rotateWithDevice": "Follow device rotation",
+          "verticalLength": "Mask height in vertical screen",
+          "horizontalLength": "Mask width in horizontal screen "
+        },
+        "screenStream": {
+          "enable": "Enable mirror",
+          "address": "Screen mirror address",
+          "addressPlaceholder": "Please enter the ScreenStream screen mirror address"
+        }
       },
       "Basic": {
+        "language": "Language",
+        "adbPath": {
+          "placeholder": "adb path",
+          "set": "Save",
+          "setSuccess": "adb path set successfully",
+          "title": "adb path"
+        }
+      },
+      "Data": {
         "delLocalStore": {
           "dialog": {
             "title": "Warning",
@@ -104,7 +119,6 @@
           },
           "warning": "Deleting data may lead to unpredictable consequences, so please operate with caution. \nIf an exception occurs, please try clearing the data and restarting the software."
         },
-        "language": "Language",
         "localStore": "Local data",
         "delCurData": "Delete current data"
       },
@@ -137,7 +151,8 @@
         "Sight": "Front sight",
         "Fire": "Fire",
         "existFire": "Fire button already exists",
-        "existSight": "Front sight button already exists"
+        "existSight": "Front sight button already exists",
+        "Swipe": "Swipe"
       },
       "buttonKeyRepeat": "Key repeat: {0}",
       "KeyCommon": {
@@ -239,6 +254,14 @@
         "scaleX": "Horizontal sensitivity",
         "scalePlaceholder": "Please enter sensitivity",
         "scaleY": "Vertical sensitivity"
+      },
+      "Swipe": {
+        "swipe": "Swipe",
+        "interval": "Swipe time interval",
+        "intervalPlaceholder": "Enter the time interval between points",
+        "pos": "Points",
+        "editPos": "Edit",
+        "editTips": "Left-click on a blank area to add a new coordinate point. \nLeft-click and drag to move a specific point, and right-click to delete the point."
       }
     }
   },

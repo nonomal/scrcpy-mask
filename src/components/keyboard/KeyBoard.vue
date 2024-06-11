@@ -8,6 +8,8 @@ import KeySkill from "./KeySkill.vue";
 import KeyObservation from "./KeyObservation.vue";
 import KeySight from "./KeySight.vue";
 import KeyFire from "./KeyFire.vue";
+import KeySwipe from "./KeySwipe.vue";
+import ScreenStream from "../ScreenStream.vue";
 
 import {
   KeyDirectionalSkill,
@@ -16,6 +18,7 @@ import {
   KeyTap,
   KeyMacro,
   KeyMapping,
+  KeySwipe as KeyMappingKeySwipe,
   KeySight as KeyMappingKeySight,
   KeyFire as KeyMappingKeyFire,
 } from "../../keyMappingConfig";
@@ -31,6 +34,7 @@ const keyboardStore = useKeyboardStore();
 const dialog = useDialog();
 const message = useMessage();
 
+const curPageActive = ref(false);
 const addButtonPos = ref({ x: 0, y: 0 });
 const addButtonOptions: DropdownOption[] = [
   {
@@ -40,6 +44,10 @@ const addButtonOptions: DropdownOption[] = [
   {
     label: () => t("pages.KeyBoard.addButton.SteeringWheel"),
     key: "SteeringWheel",
+  },
+  {
+    label: () => t("pages.KeyBoard.addButton.Swipe"),
+    key: "Swipe",
   },
   {
     label: () => t("pages.KeyBoard.addButton.Skill"),
@@ -70,6 +78,7 @@ const addButtonOptions: DropdownOption[] = [
 function onAddButtonSelect(
   type:
     | "Tap"
+    | "Swipe"
     | "SteeringWheel"
     | "DirectionalSkill"
     | "CancelSkill"
@@ -90,6 +99,12 @@ function onAddButtonSelect(
   if (type === "Tap") {
     keyMapping.pointerId = 3;
     (keyMapping as KeyTap).time = 80;
+  } else if (type === "Swipe") {
+    keyMapping.pointerId = 3;
+    (keyMapping as KeyMappingKeySwipe).pos = [
+      { x: keyMapping.posX, y: keyMapping.posY },
+    ];
+    (keyMapping as KeyMappingKeySwipe).intervalBetweenPos = 100;
   } else if (type === "SteeringWheel") {
     keyMapping.pointerId = 1;
     (keyMapping as unknown as KeyMappingSteeringWheel).key = {
@@ -137,6 +152,7 @@ function onAddButtonSelect(
   } else return;
   keyboardStore.edited = true;
   store.editKeyMappingList.push(keyMapping as KeyMapping);
+  keyboardStore.activeButtonIndex = store.editKeyMappingList.length - 1;
 }
 
 function isKeyUnique(curKey: string): boolean {
@@ -170,6 +186,7 @@ function setCurButtonKey(curKey: string) {
     keyboardStore.showButtonSettingFlag ||
     keyboardStore.activeButtonIndex >= store.editKeyMappingList.length ||
     keyboardStore.showButtonSettingFlag ||
+    keyboardStore.editSwipePointsFlag ||
     keyboardStore.showButtonAddFlag
   )
     return;
@@ -280,12 +297,14 @@ function resetKeyMappingConfig() {
 }
 
 onActivated(() => {
+  curPageActive.value = true;
   document.addEventListener("keydown", handleKeyDown);
   document.addEventListener("keyup", handleKeyUp);
   document.addEventListener("wheel", handleMouseWheel);
 });
 
 onBeforeRouteLeave(() => {
+  curPageActive.value = false;
   return new Promise((resolve, _) => {
     document.removeEventListener("keydown", handleKeyDown);
     document.removeEventListener("keyup", handleKeyUp);
@@ -316,6 +335,10 @@ onBeforeRouteLeave(() => {
 </script>
 
 <template>
+  <ScreenStream
+    :cid="store.screenStreamClientId"
+    v-if="curPageActive && store.controledDevice && store.screenStream.enable"
+  />
   <div
     v-if="store.keyMappingConfigList.length"
     id="keyboardElement"
@@ -352,6 +375,10 @@ onBeforeRouteLeave(() => {
       />
       <KeyObservation
         v-else-if="store.editKeyMappingList[index].type === 'Observation'"
+        :index="index"
+      />
+      <KeySwipe
+        v-else-if="store.editKeyMappingList[index].type === 'Swipe'"
         :index="index"
       />
       <KeySight
